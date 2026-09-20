@@ -17,6 +17,7 @@ import { notify } from "../../services/notify";
 import { recordAudit } from "../../services/audit";
 import { adjustCredit, CREDIT_DELTAS } from "../../services/moderation/credit";
 import { revokePublicVariants } from "../media/service";
+import { expireSuggestionsForComment } from "../suggestions/service";
 import { isAdmin } from "../../types/auth";
 import type { AuthUser } from "../../types/auth";
 import { logger } from "../../utils/logger";
@@ -346,6 +347,7 @@ async function performResolveAction(
         where: { id: comment.id },
         data: { status: "hidden", hiddenReason: `举报成立：${REPORT_REASONS[reason]}` },
       });
+      await expireSuggestionsForComment(comment.id);
       await adjustCredit(comment.userId, CREDIT_DELTAS.REPORT_CONFIRMED_ON_USER);
       return { action: "comment_hidden", affectedOwnerId: comment.userId };
     }

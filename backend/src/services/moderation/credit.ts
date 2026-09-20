@@ -10,6 +10,7 @@ export const CREDIT_DELTAS = {
   COMMENT_HIDDEN: -10,
   REPORT_CONFIRMED_ON_USER: -15,
   APPEAL_UPHELD: 6,
+  FIELD_SUGGESTION_ACCEPTED: 2,
 } as const;
 
 export function clampCredit(value: number): number {

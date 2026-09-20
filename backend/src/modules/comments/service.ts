@@ -16,6 +16,7 @@ import { recordAudit } from "../../services/audit";
 import { serializeComment } from "../shared/serialize";
 import { isModerator } from "../../types/auth";
 import type { AuthUser } from "../../types/auth";
+import { ingestCommentSuggestions, expireSuggestionsForComment } from "../suggestions/service";
 
 const PII_CODE = ERROR_CODES.COMMENT_PII_BLOCKED;
 
@@ -182,6 +183,16 @@ export async function createComment(
     });
   }
 
+  // 先发后审：评论已可见，立即识别其中的结构化细节（识别失败不影响评论）
+  if (status === "visible") {
+    await ingestCommentSuggestions({
+      id: comment.id,
+      spotId: spot.id,
+      userId: user.id,
+      body: input.body,
+    });
+  }
+
   return {
     ...serializeComment(comment),
     pendingModeration: status === "pending",
@@ -225,6 +236,8 @@ export async function deleteComment(commentId: bigint, user: AuthUser) {
     where: { id: commentId },
     data: { status: "deleted", hiddenReason: comment.userId === user.id ? "作者删除" : "管理员删除" },
   });
+
+  await expireSuggestionsForComment(commentId);
 
   return { id: commentId, status: "deleted" as const };
 }
@@ -280,6 +293,20 @@ export async function approveComment(commentId: bigint, moderator: AuthUser) {
     after: { status: "visible" },
   });
 
+  // 先审后发场景：审核通过、评论变为可见时再识别细节
+  const visible = await prisma.comment.findUnique({
+    where: { id: commentId },
+    select: { id: true, spotId: true, userId: true, body: true },
+  });
+  if (visible) {
+    await ingestCommentSuggestions({
+      id: visible.id,
+      spotId: visible.spotId,
+      userId: visible.userId,
+      body: visible.body,
+    });
+  }
+
   return { id: commentId, status: "visible" as const };
 }
 
@@ -294,6 +321,9 @@ export async function hideComment(commentId: bigint, moderator: AuthUser, reason
     where: { id: commentId },
     data: { status: "hidden", hiddenReason: reason },
   });
+
+  // 依据失效：这条评论产生的待处理建议全部过期
+  await expireSuggestionsForComment(commentId);
 
   await adjustCredit(comment.userId, CREDIT_DELTAS.COMMENT_HIDDEN);
 

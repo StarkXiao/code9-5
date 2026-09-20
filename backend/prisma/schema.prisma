@@ -68,6 +68,13 @@ enum CommentStatus {
   deleted
 }
 
+enum SuggestionStatus {
+  pending
+  accepted
+  dismissed
+  expired
+}
+
 enum ReportStatus {
   open
   in_review
@@ -122,6 +129,8 @@ model User {
   blurRegions       BlurRegion[]
   categorySchemas   CategorySchema[]
   settings          UserSetting?
+  fieldSuggestionsMade   FieldSuggestion[] @relation("FieldSuggestionAuthor")
+  fieldSuggestionsDecided FieldSuggestion[] @relation("FieldSuggestionDecider")
 
   @@index([role, status], map: "idx_users_role_status")
   @@map("users")
@@ -229,6 +238,7 @@ model Spot {
   comments      Comment[]
   confirmations SpotConfirmation[]
   favorites     Favorite[]
+  fieldSuggestions FieldSuggestion[]
 
   @@index([publicLat, publicLng], map: "idx_spots_geo_public")
   @@index([categoryId, status], map: "idx_spots_category")
@@ -363,6 +373,7 @@ model Comment {
   parent    Comment?         @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies   Comment[]        @relation("CommentReplies")
   revisions CommentRevision[]
+  fieldSuggestions FieldSuggestion[]
 
   @@index([spotId, status, createdAt], map: "idx_comments_spot")
   @@index([userId, createdAt], map: "idx_comments_user")
@@ -378,6 +389,37 @@ model CommentRevision {
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@map("comment_revisions")
+}
+
+// F11 评论细节字段建议：从可见评论中识别，作者确认后写回 spots.attributes
+model FieldSuggestion {
+  id            BigInt           @id @default(autoincrement())
+  spotId        BigInt           @map("spot_id")
+  commentId     BigInt           @map("comment_id")
+  suggestedBy   BigInt           @map("suggested_by")
+  fieldKey      String           @map("field_key") @db.VarChar(48)
+  fieldLabel    String           @map("field_label") @db.VarChar(48)
+  fieldType     String           @map("field_type") @db.VarChar(16)
+  proposedValue Json             @map("proposed_value")
+  valueLabel    String           @map("value_label") @db.VarChar(80)
+  evidence      Json             @default("[]")
+  status        SuggestionStatus @default(pending)
+  decidedBy     BigInt?          @map("decided_by")
+  decideReason  String?          @map("decide_reason") @db.VarChar(200)
+  decidedAt     DateTime?        @map("decided_at") @db.Timestamptz(6)
+  expiresAt     DateTime         @map("expires_at") @db.Timestamptz(6)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  spot       Spot    @relation(fields: [spotId], references: [id], onDelete: Cascade)
+  comment    Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author     User    @relation("FieldSuggestionAuthor", fields: [suggestedBy], references: [id])
+  decider    User?   @relation("FieldSuggestionDecider", fields: [decidedBy], references: [id])
+
+  @@index([spotId, status, createdAt], map: "idx_field_suggestion_owner")
+  @@index([suggestedBy, status, createdAt], map: "idx_field_suggestion_user")
+  @@index([commentId], map: "idx_field_suggestion_comment")
+  @@map("field_suggestions")
 }
 
 model SpotConfirmation {

@@ -18,6 +18,7 @@ export const ERROR_CODES = {
   COMMENT_PII_BLOCKED: "COMMENT_PII_BLOCKED",
   DUPLICATE_REPORT: "DUPLICATE_REPORT",
   ALREADY_CONFIRMED: "ALREADY_CONFIRMED",
+  SUGGESTION_NOT_PENDING: "SUGGESTION_NOT_PENDING",
   RATE_LIMITED: "RATE_LIMITED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
@@ -67,6 +68,9 @@ export const NOTIFICATION_TYPES = {
   comment_hidden: "评论被隐藏",
   report_result: "举报处理结果",
   spot_stale: "条目信息可能已过期",
+  field_suggested: "评论补充建议待确认",
+  field_suggestion_accepted: "补充建议被采纳",
+  field_suggestion_dismissed: "补充建议未被采纳",
 } as const;
 
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;
@@ -110,6 +114,8 @@ export const AUDIT_ACTIONS = {
   REPORT_RESOLVE: "report.resolve",
   REPORT_DISMISS: "report.dismiss",
   CATEGORY_SCHEMA_UPDATE: "category.schema.update",
+  FIELD_SUGGESTION_ACCEPT: "field_suggestion.accept",
+  FIELD_SUGGESTION_DISMISS: "field_suggestion.dismiss",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -128,6 +134,11 @@ export const CONFIRMATION_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** 过期上报达到该数量后条目进入待复核 */
 export const STALE_REPORT_THRESHOLD = 3;
+
+/** 字段建议待处理有效期：30 天，超时由定时任务置为 expired */
+export const SUGGESTION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** 单条评论一次识别最多产生的建议数量 */
+export const SUGGESTIONS_PER_COMMENT = 3;
 
 /** 举报合并窗口 */
 export const REPORT_MERGE_WINDOW_MS = 24 * 60 * 60 * 1000;

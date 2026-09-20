@@ -7,6 +7,7 @@ import type { Spot } from "@/api/types";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import CommentSection from "@/components/CommentSection.vue";
+import FieldSuggestionPanel from "@/components/FieldSuggestionPanel.vue";
 import ReportDialog from "@/components/ReportDialog.vue";
 
 const route = useRoute();
@@ -20,6 +21,7 @@ const busy = ref(false);
 const reportVisible = ref(false);
 const previewIndex = ref(0);
 const previewVisible = ref(false);
+const suggestionPanel = ref<InstanceType<typeof FieldSuggestionPanel> | null>(null);
 
 const uuid = computed(() => String(route.params.uuid));
 
@@ -262,6 +264,16 @@ onMounted(async () => {
           <h3 style="margin: 0 0 8px; font-size: 16px">这条记录被驳回了</h3>
           <p class="muted">如果你认为判断有误，可以在驳回后 7 天内提出申诉，由管理员终审。</p>
           <el-button type="warning" plain @click="appeal">提出申诉</el-button>
+        </section>
+
+        <section v-if="spot.status === 'published'" class="card">
+          <h3 style="margin: 0 0 12px; font-size: 16px">来自评论的补充</h3>
+          <FieldSuggestionPanel
+            ref="suggestionPanel"
+            :spot-uuid="uuid"
+            :owner-uuid="spot.author?.uuid ?? null"
+            @accepted="load"
+          />
         </section>
 
         <section class="card">

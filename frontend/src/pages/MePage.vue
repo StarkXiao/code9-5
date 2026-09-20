@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { api } from "@/api/client";
-import type { Paged, Spot } from "@/api/types";
+import type { FieldSuggestion, Paged, Spot } from "@/api/types";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 
@@ -12,10 +12,15 @@ const catalog = useCatalogStore();
 const router = useRouter();
 
 const tab = ref("contributions");
+const route = useRoute();
 const spots = ref<Spot[]>([]);
 const favorites = ref<Spot[]>([]);
+const suggestionsIncoming = ref<FieldSuggestion[]>([]);
+const suggestionsOutgoing = ref<FieldSuggestion[]>([]);
+const suggestionScope = ref<"incoming" | "outgoing">("incoming");
 const statusFilter = ref<string>("");
 const loading = ref(false);
+const busySuggestion = ref<string | null>(null);
 
 const settings = ref({ defaultFuzzRadius: 50, notifyEmail: true, notifyInapp: true });
 const passwordForm = ref({ currentPassword: "", newPassword: "" });
@@ -59,6 +64,73 @@ async function loadContributions() {
 async function loadFavorites() {
   const result = await api.get<Paged<Spot>>("/me/favorites", { pageSize: 50 });
   favorites.value = result.items;
+}
+
+const SUGGESTION_STATUS_TEXT: Record<string, string> = {
+  pending: "待确认",
+  accepted: "已采纳",
+  dismissed: "已忽略",
+  expired: "已过期",
+};
+
+function suggestionTagType(status: string): "success" | "warning" | "info" | "danger" {
+  if (status === "accepted") return "success";
+  if (status === "pending") return "warning";
+  if (status === "dismissed") return "info";
+  return "danger";
+}
+
+async function loadSuggestions() {
+  loading.value = true;
+  try {
+    const [incoming, outgoing] = await Promise.all([
+      api.get<Paged<FieldSuggestion>>("/me/suggestions", { scope: "incoming", pageSize: 50 }),
+      api.get<Paged<FieldSuggestion>>("/me/suggestions", { scope: "outgoing", pageSize: 50 }),
+    ]);
+    suggestionsIncoming.value = incoming.items;
+    suggestionsOutgoing.value = outgoing.items;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function acceptSuggestion(item: FieldSuggestion) {
+  busySuggestion.value = item.id;
+  try {
+    await api.post(`/suggestions/${item.id}/accept`);
+    ElMessage.success(`已把「${item.fieldLabel}」补充到条目`);
+    await loadSuggestions();
+    await loadContributions();
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    busySuggestion.value = null;
+  }
+}
+
+async function dismissSuggestion(item: FieldSuggestion) {
+  try {
+    const { value } = await ElMessageBox.prompt("可以告诉补充的人为什么不采纳吗（可不填）", "忽略这条建议", {
+      confirmButtonText: "忽略",
+      cancelButtonText: "取消",
+      inputPlaceholder: "选填",
+      inputValidator: (text) => (text === null || text.trim().length <= 200) || "理由不超过 200 字",
+    });
+    busySuggestion.value = item.id;
+    await api.post(`/suggestions/${item.id}/dismiss`, { reason: value?.trim() || undefined });
+    ElMessage.success("已忽略");
+    await loadSuggestions();
+  } catch (error) {
+    if (error instanceof Error && error.message !== "cancel") ElMessage.error(error.message);
+  } finally {
+    busySuggestion.value = null;
+  }
+}
+
+function openSpot(uuid?: string | null) {
+  if (uuid) void router.push({ name: "spot-detail", params: { uuid } });
 }
 
 async function loadSettings() {
@@ -143,7 +215,14 @@ async function deleteAccount() {
 
 onMounted(async () => {
   await catalog.load().catch(() => undefined);
-  await Promise.all([loadContributions(), loadFavorites(), loadSettings()]);
+  if (route.query.tab === "suggestions") {
+    tab.value = "suggestions";
+  }
+  await Promise.all([loadContributions(), loadFavorites(), loadSettings(), loadSuggestions()]);
+});
+
+watch(tab, (value) => {
+  if (value === "suggestions") void loadSuggestions();
 });
 </script>
 
@@ -218,6 +297,84 @@ onMounted(async () => {
             </el-button>
           </div>
         </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="细节补充建议" name="suggestions">
+        <el-radio-group v-model="suggestionScope" style="margin-bottom: 12px">
+          <el-radio-button value="incoming">待我确认</el-radio-button>
+          <el-radio-button value="outgoing">我提出的</el-radio-button>
+        </el-radio-group>
+
+        <div v-loading="loading">
+          <template v-if="suggestionScope === 'incoming'">
+            <el-empty
+              v-if="suggestionsIncoming.length === 0"
+              description="暂时没有待确认的补充建议。有人在评论里补充新细节时会出现在这里。"
+            />
+            <el-card v-for="item in suggestionsIncoming" :key="item.id" shadow="never" style="margin-bottom: 10px">
+              <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+                <div style="flex: 1; min-width: 240px">
+                  <div>
+                    <el-tag size="small" :type="suggestionTagType(item.status)">
+                      {{ SUGGESTION_STATUS_TEXT[item.status] ?? item.status }}
+                    </el-tag>
+                    <span style="margin-left: 8px; font-weight: 600">{{ item.fieldLabel }}</span>
+                    <span class="muted" style="margin-left: 8px">建议值：{{ item.valueLabel }}</span>
+                  </div>
+                  <p
+                    v-for="(line, index) in item.evidence"
+                    :key="index"
+                    class="muted"
+                    style="margin: 6px 0 0; font-size: 13px"
+                  >
+                    “{{ line }}”
+                  </p>
+                  <p class="muted" style="margin: 6px 0 0; font-size: 13px">
+                    来自 {{ item.commenter?.nickname ?? "匿名" }} ·
+                    <el-link type="primary" :underline="false" @click="openSpot(item.spot?.uuid)">
+                      {{ item.spot?.title }}
+                    </el-link>
+                  </p>
+                  <p v-if="item.decideReason" class="muted" style="margin: 4px 0 0; font-size: 13px">
+                    理由：{{ item.decideReason }}
+                  </p>
+                </div>
+                <div v-if="item.status === 'pending' && !item.expired" style="display: flex; gap: 8px">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    :loading="busySuggestion === item.id"
+                    @click="acceptSuggestion(item)"
+                  >
+                    采纳
+                  </el-button>
+                  <el-button size="small" :disabled="busySuggestion === item.id" @click="dismissSuggestion(item)">
+                    忽略
+                  </el-button>
+                </div>
+              </div>
+            </el-card>
+          </template>
+
+          <template v-else>
+            <el-empty v-if="suggestionsOutgoing.length === 0" description="你还没有在评论里提出过被识别的细节" />
+            <el-card v-for="item in suggestionsOutgoing" :key="item.id" shadow="never" style="margin-bottom: 10px">
+              <el-tag size="small" :type="suggestionTagType(item.status)">
+                {{ SUGGESTION_STATUS_TEXT[item.status] ?? item.status }}
+              </el-tag>
+              <span style="margin-left: 8px; font-weight: 600">{{ item.fieldLabel }}：{{ item.valueLabel }}</span>
+              <p class="muted" style="margin: 6px 0 0; font-size: 13px">
+                <el-link type="primary" :underline="false" @click="openSpot(item.spot?.uuid)">
+                  {{ item.spot?.title }}
+                </el-link>
+                · {{ new Date(item.createdAt).toLocaleDateString("zh-CN") }}
+              </p>
+              <p v-if="item.decideReason" class="muted" style="margin: 4px 0 0; font-size: 13px">
+                发布者回复：{{ item.decideReason }}
+              </p>
+            </el-card>
+          </template>
+        </div>
       </el-tab-pane>
 
       <el-tab-pane label="账号设置" name="settings">

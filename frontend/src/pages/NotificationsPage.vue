@@ -17,7 +17,6 @@ function open(item: (typeof notifications.items)[number]) {
     void router.push({ name: "spot-detail", params: { uuid: spotUuid } });
   }
 }
-
 onMounted(() => void notifications.load());
 </script>
 

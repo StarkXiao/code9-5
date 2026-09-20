@@ -224,8 +224,32 @@ export interface ReviewTaskDetail {
   reasonCodes: Record<string, string>;
 }
 
-export interface ReportItem {
+export interface FieldSuggestion {
   id: string;
+  status: "pending" | "accepted" | "dismissed" | "expired";
+  fieldKey: string;
+  fieldLabel: string;
+  fieldType: "boolean" | "string" | "integer" | "array";
+  proposedValue: unknown;
+  valueLabel: string;
+  evidence: string[];
+  decideReason: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+  expiresAt: string;
+  expired: boolean;
+  comment: { id: string; body: string; status: string } | null;
+  commenter: { uuid: string; nickname: string } | null;
+  spot: {
+    uuid: string;
+    title: string;
+    status: string;
+    categoryCode: string;
+    categoryName: string;
+  } | null;
+}
+
+export interface ReportItem {  id: string;
   targetType: string;
   targetId: string;
   targetLabel: string;
