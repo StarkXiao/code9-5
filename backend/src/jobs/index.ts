@@ -3,6 +3,7 @@ import { env } from "../config/env";
 import { STALE_REPORT_THRESHOLD } from "../config/constants";
 import { computeFreshness } from "../services/moderation/credit";
 import { purgeOriginal } from "../modules/media/service";
+import { expireSuggestions } from "../modules/suggestions/service";
 import { notify } from "../services/notify";
 import { logger } from "../utils/logger";
 import { redis } from "../db/redis";
@@ -184,16 +185,17 @@ export async function purgeOriginalImages(): Promise<{ purged: number }> {
   return { purged };
 }
 
-/** 日常清理：过期令牌、超期通知、失效的审核锁 */
+/** 日常清理：过期令牌、超期通知、失效的审核锁、过期的评论补充建议 */
 export async function cleanup(): Promise<{
   tokens: number;
   notifications: number;
   locks: number;
   unmuted: number;
+  suggestions: number;
 }> {
   const now = new Date();
 
-  const [tokens, notifications, locks, unmuted] = await Promise.all([
+  const [tokens, notifications, locks, unmuted, suggestions] = await Promise.all([
     prisma.refreshToken.deleteMany({
       where: { OR: [{ expiresAt: { lt: now } }, { revokedAt: { lt: new Date(now.getTime() - 30 * MS_PER_DAY) } }] },
     }),
@@ -209,6 +211,8 @@ export async function cleanup(): Promise<{
       where: { status: "muted", mutedUntil: { lt: now } },
       data: { status: "active", mutedUntil: null },
     }),
+    // 超过 30 天没人确认的评论补充建议自动失效
+    expireSuggestions(),
   ]);
 
   return {
@@ -216,5 +220,6 @@ export async function cleanup(): Promise<{
     notifications: notifications.count,
     locks: locks.count,
     unmuted: unmuted.count,
+    suggestions: suggestions.expired,
   };
 }

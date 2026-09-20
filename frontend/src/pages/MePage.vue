@@ -3,7 +3,7 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { api } from "@/api/client";
-import type { Paged, Spot } from "@/api/types";
+import type { DetailSuggestion, Paged, Spot } from "@/api/types";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 
@@ -14,6 +14,9 @@ const router = useRouter();
 const tab = ref("contributions");
 const spots = ref<Spot[]>([]);
 const favorites = ref<Spot[]>([]);
+const suggestions = ref<DetailSuggestion[]>([]);
+const contributions = ref<DetailSuggestion[]>([]);
+const pendingSuggestionCount = ref(0);
 const statusFilter = ref<string>("");
 const loading = ref(false);
 
@@ -59,6 +62,82 @@ async function loadContributions() {
 async function loadFavorites() {
   const result = await api.get<Paged<Spot>>("/me/favorites", { pageSize: 50 });
   favorites.value = result.items;
+}
+
+// ---------------------------------------------------------------- 评论补充建议
+
+const SUGGESTION_STATUS_LABEL: Record<string, string> = {
+  pending: "待确认",
+  accepted: "已采纳",
+  rejected: "未采纳",
+  expired: "已失效",
+};
+
+function suggestionTagType(status: string): "success" | "warning" | "info" | "danger" {
+  if (status === "accepted") return "success";
+  if (status === "pending") return "warning";
+  if (status === "rejected") return "danger";
+  return "info";
+}
+
+function describeSuggestionValue(item: DetailSuggestion): string {
+  const category = catalog.byCode(item.category.code);
+  const property = category?.schema.properties[item.fieldKey];
+
+  if (typeof item.proposedValue === "boolean") return item.proposedValue ? "是" : "否";
+  if (typeof item.proposedValue === "number") {
+    return `${item.proposedValue}${property?.unit ?? ""}`;
+  }
+  if (Array.isArray(item.proposedValue)) {
+    return item.proposedValue
+      .map((value) => property?.items?.enumLabels?.[String(value)] ?? String(value))
+      .join("、");
+  }
+  if (typeof item.proposedValue === "string") {
+    return property?.enumLabels?.[item.proposedValue] ?? item.proposedValue;
+  }
+  return String(item.proposedValue ?? "");
+}
+
+async function loadSuggestions() {
+  const result = await api.get<Paged<DetailSuggestion>>("/me/suggestions", {
+    status: "pending",
+    pageSize: 50,
+  });
+  suggestions.value = result.items;
+  pendingSuggestionCount.value = result.total;
+}
+
+async function loadContributedSuggestions() {
+  const result = await api.get<Paged<DetailSuggestion>>("/me/suggestions/contributed", {
+    pageSize: 50,
+  });
+  contributions.value = result.items;
+}
+
+async function acceptSuggestion(item: DetailSuggestion) {
+  try {
+    await api.post(`/suggestions/${item.id}/accept`);
+    ElMessage.success(`已把「${item.fieldLabel}」补充到条目`);
+    await Promise.all([loadSuggestions(), loadContributedSuggestions()]);
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
+}
+
+async function rejectSuggestion(item: DetailSuggestion) {
+  try {
+    const { value } = await ElMessageBox.prompt("可以填写不采纳的原因（选填，会通知评论作者）", "不采纳", {
+      confirmButtonText: "确认",
+      cancelButtonText: "取消",
+      inputValidator: (text) => !text || text.trim().length <= 200 || "理由不超过 200 字",
+    });
+    await api.post(`/suggestions/${item.id}/reject`, { reason: value?.trim() || undefined });
+    ElMessage.success("已忽略");
+    await loadSuggestions();
+  } catch (error) {
+    if (error instanceof Error && error.message) ElMessage.error(error.message);
+  }
 }
 
 async function loadSettings() {
@@ -143,7 +222,13 @@ async function deleteAccount() {
 
 onMounted(async () => {
   await catalog.load().catch(() => undefined);
-  await Promise.all([loadContributions(), loadFavorites(), loadSettings()]);
+  await Promise.all([
+    loadContributions(),
+    loadFavorites(),
+    loadSettings(),
+    loadSuggestions(),
+    loadContributedSuggestions(),
+  ]);
 });
 </script>
 
@@ -215,6 +300,74 @@ onMounted(async () => {
             </div>
             <el-button size="small" @click="router.push({ name: 'spot-detail', params: { uuid: spot.uuid } })">
               查看
+            </el-button>
+          </div>
+        </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane name="suggestions">
+        <template #label>
+          <span>待确认补充<el-badge v-if="pendingSuggestionCount" :value="pendingSuggestionCount" style="margin-left: 6px" /></span>
+        </template>
+
+        <p class="muted" style="margin: 0 0 12px">
+          其他用户在你发布的地点评论里提到了新的现场细节，采纳后会自动写回条目；30 天未处理会自动失效。
+        </p>
+        <el-empty v-if="suggestions.length === 0" description="暂时没有需要确认的补充" />
+
+        <el-card v-for="item in suggestions" :key="item.id" shadow="never" style="margin-bottom: 10px">
+          <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+            <div style="min-width: 240px">
+              <strong>{{ item.spotTitle }}</strong>
+              <p style="margin: 6px 0 0">
+                {{ item.fieldLabel }}
+                <el-tag size="small" type="success" effect="plain" style="margin-left: 6px">
+                  建议填：{{ describeSuggestionValue(item) }}
+                </el-tag>
+                <el-tag v-if="item.supportCount > 1" size="small" type="info" effect="plain" style="margin-left: 6px">
+                  {{ item.supportCount }} 人提到
+                </el-tag>
+              </p>
+              <p class="muted" style="margin: 6px 0 0; font-size: 13px">「{{ item.evidence }}」</p>
+            </div>
+            <div style="display: flex; gap: 6px; align-items: flex-start">
+              <el-button size="small" type="primary" @click="acceptSuggestion(item)">采纳并补充</el-button>
+              <el-button size="small" @click="rejectSuggestion(item)">不采纳</el-button>
+              <el-button
+                size="small"
+                @click="router.push({ name: 'spot-detail', params: { uuid: item.spotUuid } })"
+              >
+                查看条目
+              </el-button>
+            </div>
+          </div>
+        </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="我的补充" name="contributed-detail">
+        <p class="muted" style="margin: 0 0 12px">你在评论里补充过的结构化细节，以及发布者是否采纳。</p>
+        <el-empty v-if="contributions.length === 0" description="还没有从你的评论里识别出可补充的细节" />
+
+        <el-card v-for="item in contributions" :key="item.id" shadow="never" style="margin-bottom: 10px">
+          <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+            <div>
+              <el-tag size="small" :type="suggestionTagType(item.status)">
+                {{ SUGGESTION_STATUS_LABEL[item.status] ?? item.status }}
+              </el-tag>
+              <strong style="margin-left: 8px">{{ item.spotTitle }}</strong>
+              <p style="margin: 6px 0 0">
+                {{ item.fieldLabel }}：{{ describeSuggestionValue(item) }}
+              </p>
+              <p class="muted" style="margin: 4px 0 0; font-size: 13px">「{{ item.evidence }}」</p>
+              <p v-if="item.declineReason" class="muted" style="margin: 4px 0 0; font-size: 13px">
+                未采纳原因：{{ item.declineReason }}
+              </p>
+            </div>
+            <el-button
+              size="small"
+              @click="router.push({ name: 'spot-detail', params: { uuid: item.spotUuid } })"
+            >
+              查看条目
             </el-button>
           </div>
         </el-card>

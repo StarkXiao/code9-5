@@ -87,6 +87,26 @@ export interface Comment {
   pendingModeration?: boolean;
 }
 
+export interface DetailSuggestion {
+  id: string;
+  spotUuid: string;
+  spotTitle: string;
+  category: { code: string; name: string };
+  status: "pending" | "accepted" | "rejected" | "expired";
+  fieldKey: string;
+  fieldLabel: string;
+  fieldType: "boolean" | "string" | "integer" | "array";
+  proposedValue: unknown;
+  evidence: string;
+  supportCount: number;
+  declineReason: string | null;
+  sourceCommentId: string;
+  sourceUser: { nickname: string } | null;
+  decidedAt: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface NotificationItem {
   id: string;
   type: string;

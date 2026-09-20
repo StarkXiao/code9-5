@@ -5,6 +5,7 @@ import { spotsRouter, meRouter } from "./modules/spots/routes";
 import { mediaRouter, moderationMediaRouter } from "./modules/media/routes";
 import { moderationRouter } from "./modules/reviews/routes";
 import { commentsRouter, moderationCommentsRouter } from "./modules/comments/routes";
+import { suggestionsRouter } from "./modules/suggestions/routes";
 import { reportsRouter, moderationReportsRouter } from "./modules/reports/routes";
 import { notificationsRouter } from "./modules/notifications/routes";
 import { usersRouter } from "./modules/users/routes";
@@ -40,6 +41,7 @@ export function buildApiRouter(): Router {
   router.use(mediaRouter);
   router.use(commentsRouter);
   router.use(reportsRouter);
+  router.use(suggestionsRouter);
   router.use(notificationsRouter);
   router.use(usersRouter);
 

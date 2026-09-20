@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import CommentSection from "@/components/CommentSection.vue";
 import ReportDialog from "@/components/ReportDialog.vue";
+import SuggestionPanel from "@/components/SuggestionPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -226,6 +227,13 @@ onMounted(async () => {
             </template>
           </dl>
         </section>
+
+        <SuggestionPanel
+          :spot-uuid="uuid"
+          :category="spot.category"
+          :is-owner="isOwner"
+          @accepted="load"
+        />
 
         <section v-if="spot.media.length" class="card">
           <h3 style="margin: 0 0 12px; font-size: 16px">现场照片</h3>

@@ -14,6 +14,7 @@ import { adjustCredit, CREDIT_DELTAS } from "../../services/moderation/credit";
 import { notify } from "../../services/notify";
 import { recordAudit } from "../../services/audit";
 import { serializeComment } from "../shared/serialize";
+import { extractSuggestionsFromComment } from "../suggestions/service";
 import { isModerator } from "../../types/auth";
 import type { AuthUser } from "../../types/auth";
 
@@ -182,6 +183,11 @@ export async function createComment(
     });
   }
 
+  // 先发后审的可信用户：评论即时公开，立刻尝试从中提取待补充字段
+  if (status === "visible") {
+    await extractSuggestionsFromComment(spot.id, { id: comment.id, body: input.body, userId: user.id });
+  }
+
   return {
     ...serializeComment(comment),
     pendingModeration: status === "pending",
@@ -264,7 +270,7 @@ export async function listPendingComments(query: { page: number; pageSize: numbe
 export async function approveComment(commentId: bigint, moderator: AuthUser) {
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
-    select: { id: true, status: true, userId: true },
+    select: { id: true, status: true, userId: true, body: true, spotId: true },
   });
   if (!comment) throw AppError.notFound("评论不存在");
   if (comment.status !== "pending") {
@@ -272,6 +278,14 @@ export async function approveComment(commentId: bigint, moderator: AuthUser) {
   }
 
   await prisma.comment.update({ where: { id: commentId }, data: { status: "visible" } });
+
+  // 先审后发的评论在通过时才公开，此时同样跑一次细节提取
+  await extractSuggestionsFromComment(comment.spotId, {
+    id: comment.id,
+    body: comment.body,
+    userId: comment.userId,
+  });
+
   await recordAudit({
     actorId: moderator.id,
     action: AUDIT_ACTIONS.REVIEW_APPROVE,

@@ -67,6 +67,9 @@ export const NOTIFICATION_TYPES = {
   comment_hidden: "评论被隐藏",
   report_result: "举报处理结果",
   spot_stale: "条目信息可能已过期",
+  detail_suggestion: "评论里有可补充的细节",
+  detail_accepted: "你补充的细节被采纳了",
+  detail_rejected: "你补充的细节未被采纳",
 } as const;
 
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;
@@ -107,6 +110,8 @@ export const AUDIT_ACTIONS = {
   USER_ROLE: "user.role",
   SPOT_HIDE: "spot.hide",
   SPOT_RESTORE: "spot.restore",
+  SUGGESTION_ACCEPT: "suggestion.accept",
+  SUGGESTION_REJECT: "suggestion.reject",
   REPORT_RESOLVE: "report.resolve",
   REPORT_DISMISS: "report.dismiss",
   CATEGORY_SCHEMA_UPDATE: "category.schema.update",
@@ -125,6 +130,15 @@ export const COMMENT_MAX_EDITS = 1;
 
 /** 同一用户对同一条目的确认冷却期 */
 export const CONFIRMATION_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** 评论细节建议等待发布者确认的时长，超时自动失效 */
+export const SUGGESTION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** 单条评论最多提取多少条字段建议，防止一条长评论刷屏发布者 */
+export const SUGGESTIONS_PER_COMMENT = 3;
+
+/** 每个条目同时挂起的待确认建议上限 */
+export const PENDING_SUGGESTIONS_PER_SPOT = 20;
 
 /** 过期上报达到该数量后条目进入待复核 */
 export const STALE_REPORT_THRESHOLD = 3;

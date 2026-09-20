@@ -68,6 +68,13 @@ enum CommentStatus {
   deleted
 }
 
+enum SuggestionStatus {
+  pending
+  accepted
+  rejected
+  expired
+}
+
 enum ReportStatus {
   open
   in_review
@@ -112,6 +119,8 @@ model User {
   mediaConfirmed    MediaAsset[]       @relation("MediaPrivacyConfirmedBy")
   comments          Comment[]
   confirmations     SpotConfirmation[]
+  suggestionsFiled  SpotSuggestion[]   @relation("SuggestionSource")
+  suggestionsDecided SpotSuggestion[]  @relation("SuggestionDecidedBy")
   favorites         Favorite[]
   reportsFiled      Report[]           @relation("ReportReporter")
   reportsHandled    Report[]           @relation("ReportHandler")
@@ -228,6 +237,7 @@ model Spot {
   reviewTasks   ReviewTask[]
   comments      Comment[]
   confirmations SpotConfirmation[]
+  suggestions   SpotSuggestion[]
   favorites     Favorite[]
 
   @@index([publicLat, publicLng], map: "idx_spots_geo_public")
@@ -363,6 +373,7 @@ model Comment {
   parent    Comment?         @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies   Comment[]        @relation("CommentReplies")
   revisions CommentRevision[]
+  suggestions SpotSuggestion[]
 
   @@index([spotId, status, createdAt], map: "idx_comments_spot")
   @@index([userId, createdAt], map: "idx_comments_user")
@@ -393,6 +404,41 @@ model SpotConfirmation {
 
   @@index([spotId, userId, createdAt], map: "idx_confirm_spot_user")
   @@map("spot_confirmations")
+}
+
+// 评论细节提取：从评论里识别出的、条目尚未填写的结构化字段，
+// 推送给条目发布者确认；采纳后由系统直接写回 spot.attributes。
+model SpotSuggestion {
+  id          BigInt           @id @default(autoincrement())
+  spotId      BigInt           @map("spot_id")
+  // 字段名对应分类 Schema 里的 properties key（如 has_backrest / condition）
+  fieldKey    String           @map("field_key") @db.VarChar(48)
+  fieldLabel  String           @map("field_label") @db.VarChar(48)
+  // boolean / string(枚举) / integer / array
+  fieldType   String           @map("field_type") @db.VarChar(16)
+  proposedValue Json           @map("proposed_value")
+  // 触发该建议的原始评论摘录（截短句），发布者据此判断
+  evidence    String           @db.VarChar(120)
+  status      SuggestionStatus @default(pending)
+  sourceCommentId BigInt       @map("source_comment_id")
+  sourceUserId    BigInt       @map("source_user_id")
+  supportCount    Int          @default(1) @map("support_count")
+  decidedBy    BigInt?         @map("decided_by")
+  decidedAt    DateTime?       @map("decided_at") @db.Timestamptz(6)
+  declineReason String?        @map("decline_reason") @db.VarChar(200)
+  expiresAt    DateTime        @map("expires_at") @db.Timestamptz(6)
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  spot      Spot    @relation(fields: [spotId], references: [id], onDelete: Cascade)
+  comment   Comment @relation(fields: [sourceCommentId], references: [id], onDelete: Cascade)
+  sourceUser User   @relation("SuggestionSource", fields: [sourceUserId], references: [id])
+  decidedByUser User? @relation("SuggestionDecidedBy", fields: [decidedBy], references: [id])
+
+  @@unique([sourceCommentId, fieldKey], map: "spot_suggestions_comment_field_key")
+  @@index([spotId, status, createdAt], map: "idx_suggestions_spot")
+  @@index([sourceUserId, status], map: "idx_suggestions_source")
+  @@map("spot_suggestions")
 }
 
 model Favorite {
